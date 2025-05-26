@@ -20,6 +20,7 @@ class LoggerMiddleware implements MiddlewareInterface
     {
         $this->request = $request;
         $this->logger = $loggerFactory->get('trace-links');
+
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
