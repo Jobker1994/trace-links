@@ -1,0 +1,30 @@
+{
+  "name": "whs/trace-links",
+  "description": "追踪请求链路",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Wu Haisheng",
+      "email": "735298019@qq.com"
+    }
+  ],
+  "require": {
+    "php": "^7.4|^8.0",
+    "hyperf/http-server": "^2.2",
+    "hyperf/database": "^2.2",
+    "hyperf/logger": "^2.2",
+    "hyperf/event": "^2.2",
+    "hyperf/context": "^2.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "TraceLinks\\": "src/"
+    }
+  },
+  "extra": {
+    "hyperf": {
+      "config": "config"
+    }
+  }
+}
