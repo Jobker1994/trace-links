@@ -24,7 +24,7 @@
   },
   "extra": {
     "hyperf": {
-      "config": "config"
+      "config": "TraceLinks\\ConfigProvider"
     }
   }
 }
