@@ -24,14 +24,7 @@
   },
   "extra": {
     "hyperf": {
-      "config": "config",
-      "aspects": [
-        "TraceLinks\\RedisLoggerAspect"
-      ],
-      "listeners": [
-        "TraceLinks\\SqlQueryListener"
-      ]
+      "config": "TraceLinks\\ConfigProvider"
     }
   }
-
 }

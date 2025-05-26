@@ -9,10 +9,10 @@ class ConfigProvider
     public function __invoke(): array
     {
         return [
-            'dependencies' => [
-                RedisLoggerAspect::class => \Hyperf\Di\Annotation\Inject::class,
-                SqlQueryListener::class => \Hyperf\Di\Annotation\Inject::class,
-            ],
+//            'dependencies' => [
+//                RedisLoggerAspect::class => \Hyperf\Di\Annotation\Inject::class,
+//                SqlQueryListener::class => \Hyperf\Di\Annotation\Inject::class,
+//            ],
             'aspects' => [
                 RedisLoggerAspect::class,
             ],

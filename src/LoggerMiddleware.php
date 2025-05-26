@@ -3,6 +3,7 @@
 namespace TraceLinks;
 
 use Hyperf\HttpMessage\Stream\SwooleStream;
+use Monolog\Logger;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -19,7 +20,27 @@ class LoggerMiddleware implements MiddlewareInterface
     public function __construct(RequestInterface $request, LoggerFactory $loggerFactory)
     {
         $this->request = $request;
-        $this->logger = $loggerFactory->get('trace-links');
+        $config = \Hyperf\Utils\ApplicationContext::getContainer()->get(\Hyperf\Contract\ConfigInterface::class);
+        $logChannels = $config->get('logger', []);
+
+        if (!isset($logChannels['trace-links'])) {
+            // 动态注册 Logger
+            $appName = env('APP_NAME', 'default-trace-links');
+            $path = "/data/storage/{$appName}/logs/trace-links/{$appName}-trace-links.log";
+            if (!is_dir(dirname($path))) {
+                mkdir(dirname($path), 0755, true);
+            }
+
+            $handler = new \Monolog\Handler\RotatingFileHandler($path, 7, Logger::INFO);
+            $formatter = new \Monolog\Formatter\LineFormatter(null, 'Y-m-d H:i:s', true);
+            $handler->setFormatter($formatter);
+
+            $logger = new Logger('trace-links');
+            $logger->pushHandler($handler);
+            $this->logger = $logger;
+        } else {
+            $this->logger = $loggerFactory->get('trace-links');
+        }
 
     }
 
@@ -31,7 +52,7 @@ class LoggerMiddleware implements MiddlewareInterface
 
         $duration = round((microtime(true) - $start) * 1000, 2) . ' ms';
         $sqls = Context::get('sql.logs', []);
-        
+
         // 获取响应体
         $responseBody = '';
         if ($response->getBody() instanceof SwooleStream) {
