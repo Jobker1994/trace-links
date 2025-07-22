@@ -38,7 +38,6 @@ namespace TraceLinks;
 use Hyperf\Context\Context;
 use Hyperf\Di\Annotation\Aspect;
 use Hyperf\Di\Aop\AbstractAspect;
-use Hyperf\Redis\Redis;
 use Hyperf\Redis\RedisProxy;
 
 use Hyperf\Di\Aop\ProceedingJoinPoint;

@@ -15,6 +15,7 @@ class ConfigProvider
 //            ],
             'aspects' => [
                 RedisLoggerAspect::class,
+                ExceptionAspect::class,
             ],
             'listeners' => [
                 SqlQueryListener::class,
