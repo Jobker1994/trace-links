@@ -56,6 +56,7 @@ class LoggerMiddleware implements MiddlewareInterface
             $table->increments('id');
             $table->unsignedInteger('operator_id')->default(0)->comment('操作员id');
             $table->string('operator', 50)->default('')->comment('操作员');
+            $table->unsignedTinyInteger('rank')->default(1)->comment('级别:1=info,2=error');
             $table->string('uri', 200)->default('')->comment('请求uri');
             $table->string('method', 10)->default('')->comment('请求方法');
             $table->string('ip', 200)->default('')->comment('ip');
@@ -81,7 +82,7 @@ class LoggerMiddleware implements MiddlewareInterface
      */
     private function writeTraceLink(array $payload): void
     {
-        // 长文本裁剪，避免 TEXT 溢出（~64KB）；你也可改成 MEDIUMTEXT
+        // 长文本裁剪，避免 TEXT 溢出（~64KB）；也可改成 MEDIUMTEXT
         $limit = 65000;
 
         $data = [
@@ -100,6 +101,10 @@ class LoggerMiddleware implements MiddlewareInterface
             'request_time'  => $payload['request_time'] ?? date('Y-m-d H:i:s'),
             'created_at'    => date('Y-m-d H:i:s'),
         ];
+
+        if(!empty($payload['throw_error'])){
+            $data['rank'] = 2;
+        }
 
         try {
             Db::table('trace_links')->insert($data);
