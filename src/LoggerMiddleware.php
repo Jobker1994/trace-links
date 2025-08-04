@@ -2,10 +2,13 @@
 
 namespace TraceLinks;
 
+use App\Exception\BizException;
 use Hyperf\Database\Schema\Schema;
 use Hyperf\DbConnection\Db;
 use Hyperf\HttpMessage\Stream\SwooleStream;
+use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
 use Monolog\Logger;
+use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -17,32 +20,15 @@ use Hyperf\Database\Schema\Blueprint;
 class LoggerMiddleware implements MiddlewareInterface
 {
     protected RequestInterface $request;
-    protected \Psr\Log\LoggerInterface $logger;
+    /**
+     * @var ContainerInterface
+     */
+    protected $container;
 
-    public function __construct(RequestInterface $request, LoggerFactory $loggerFactory)
+    public function __construct(ContainerInterface $container,RequestInterface $request)
     {
         $this->request = $request;
-        $config = \Hyperf\Utils\ApplicationContext::getContainer()->get(\Hyperf\Contract\ConfigInterface::class);
-        $logChannels = $config->get('logger', []);
-
-        if (!isset($logChannels['trace-links'])) {
-            // 动态注册 Logger
-            $appName = env('APP_NAME', 'default-trace-links');
-            $path = "/data/storage/{$appName}/logs/trace-links/{$appName}-trace-links.log";
-            if (!is_dir(dirname($path))) {
-                mkdir(dirname($path), 0755, true);
-            }
-
-            $handler = new \Monolog\Handler\RotatingFileHandler($path, 7, Logger::INFO);
-            $formatter = new \Monolog\Formatter\LineFormatter(null, 'Y-m-d H:i:s', true);
-            $handler->setFormatter($formatter);
-
-            $logger = new Logger('trace-links');
-            $logger->pushHandler($handler);
-            $this->logger = $logger;
-        } else {
-            $this->logger = $loggerFactory->get('trace-links');
-        }
+        $this->container = $container;
 
     }
 
@@ -91,13 +77,13 @@ class LoggerMiddleware implements MiddlewareInterface
             'uri'           => (string)($payload['uri'] ?? ''),
             'method'        => (string)($payload['method'] ?? ''),
             'ip'            => (string)($payload['ip'] ?? ''),
-            'params'        => mb_strimwidth(json_encode($payload['params'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit),
+            'params'        => mb_strimwidth(json_encode($payload['params'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit, '...', 'UTF-8'),
             'duration'      => (int)($payload['duration'] ?? 0),
-            'sqls'          => mb_strimwidth(json_encode($payload['sqls'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit),
-            'redis'         => mb_strimwidth(json_encode($payload['redis'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit),
-            'throw_error'   => mb_strimwidth(json_encode($payload['throw_error'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit),
+            'sqls'          => mb_strimwidth(json_encode($payload['sqls'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, $limit, '...', 'UTF-8'),
+            'redis'         => mb_strimwidth(json_encode($payload['redis'],JSON_UNESCAPED_UNICODE), 0, $limit, '...', 'UTF-8'),
+            'throw_error'   => mb_strimwidth(json_encode($payload['throw_error'],JSON_UNESCAPED_UNICODE), 0, $limit, '...', 'UTF-8'),
             'response_code' => (string)($payload['response_code'] ?? ''),
-            'response_body' => mb_strimwidth((string)$payload['response_body'], 0, $limit),
+            'response_body' => mb_strimwidth((string)$payload['response_body'], 0,  $limit, '...', 'UTF-8'),
             'request_time'  => $payload['request_time'] ?? date('Y-m-d H:i:s'),
             'created_at'    => date('Y-m-d H:i:s'),
         ];
@@ -124,46 +110,83 @@ class LoggerMiddleware implements MiddlewareInterface
     {
         $start = microtime(true);
 
-        $response = $handler->handle($request);
+        $response = $this->container->get(HttpResponse::class);
 
-        $duration = round((microtime(true) - $start) * 1000, 2) . ' ms';
-        $sqls = Context::get('sql.logs', []);
-
-
-        // 获取响应体
+        $code = 200;
         $responseBody = '';
-        if ($response->getBody() instanceof SwooleStream) {
-            $responseBody = (string) $response->getBody();
-            $responseBody = config('app_env') !== 'prod' ? $responseBody : '[hidden]';
-            $responseBody =  mb_substr($responseBody, 0, 2000);
+
+        try {
+            $response = $handler->handle($request);
+
+            if ($response && $response->getBody() instanceof SwooleStream) {
+                $responseBody = (string) $response->getBody();
+//                $responseBody = config('app_env') !== 'prod' ? $responseBody : '[hidden]';
+                $responseBody =  mb_substr($responseBody, 0, 2000);
+            }
+
+
+            return $response;
+        }catch (\Throwable $e){
+            $code = $response->getStatusCode();
+
+            if($code == 500){
+                $msg = 'internal server error';
+            }else{
+                $body = json_decode($e->getMessage(),true);
+
+                $msg = $body['message']??'系统异常,请稍后重试';
+            }
+
+            $d = [
+                'code' => $code,
+                'message' => $msg,
+            ];
+
+            $logs[] = [
+                'info'   => $e->getMessage(),
+                'trace'  => $e->getTrace(),
+            ];
+
+            Context::set('throwError.logs', $logs);
+
+            $responseBody = json_encode($d,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            return $response->json($d);
+
+        } finally {
+            $duration = round((microtime(true) - $start) * 1000, 2) . ' ms';
+            $sqls = Context::get('sql.logs', []);
+
+            $redisLogs = Context::get('redis.logs', []);
+
+            $throwError = Context::get('throwError.logs', []);
+
+            $userInfo = Context::get('user_info', []); // 操作员
+
+            $this->ensureTraceLinksTable(); // 确保存在（仅首次建）
+
+            // 将下面的原来写入日志文件的数据插入表
+
+            $this->writeTraceLink([
+                'request_time'  => date('Y-m-d H:i:s'),
+                'method'        => $this->request->getMethod(),
+                'uri'           => (string)$this->request->getUri(),
+                'ip'            => $this->request->getServerParams()['remote_addr'] ?? 'unknown',
+                'operator'      => $userInfo ? $userInfo['name'] : '',
+                'operator_id'   => $userInfo ? ($userInfo['id'] ?? 0) : 0,
+                'params'        => $this->request->all(),
+                'duration'      => $duration,
+                'sqls'          => $sqls,        // 数组/字符串都行，会 JSON 化
+                'redis'         => $redisLogs,   // 同上
+                'throw_error'   => $throwError,   // 同上
+                'response_code' => $code,
+                'response_body' => $responseBody, // 已读取字符串
+            ]);
+
+
         }
 
-        $redisLogs = Context::get('redis.logs', []);
 
-        $throwError = Context::get('throwError.logs', []);
 
-        $userInfo = Context::get('user_info', []); // 操作员
-
-        $this->ensureTraceLinksTable(); // 确保存在（仅首次建）
-
-        // 将下面的原来写入日志文件的数据插入表
-
-        $this->writeTraceLink([
-            'request_time'  => date('Y-m-d H:i:s'),
-            'method'        => $this->request->getMethod(),
-            'uri'           => (string)$this->request->getUri(),
-            'ip'            => $this->request->getServerParams()['remote_addr'] ?? 'unknown',
-            'operator'      => $userInfo ? $userInfo['name'] : '',
-            'operator_id'   => $userInfo ? ($userInfo['id'] ?? 0) : 0,
-            'params'        => $this->request->all(),
-            'duration'      => $duration,
-            'sqls'          => $sqls,        // 数组/字符串都行，会 JSON 化
-            'redis'         => $redisLogs,   // 同上
-            'throw_error'   => $throwError,   // 同上
-            'response_code' => $response->getStatusCode(),
-            'response_body' => $responseBody, // 已读取字符串
-        ]);
-
-        return $response;
     }
 }

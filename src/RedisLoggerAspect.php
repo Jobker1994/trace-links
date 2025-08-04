@@ -68,10 +68,22 @@ class RedisLoggerAspect extends AbstractAspect
         $method = $keys['name'] ??  'unknown';
 
         $logs = Context::get('redis.logs', []);
-        $logs[] = [
+
+        $d =  [
             'method' => $method,
             'arguments' => $arguments,
         ];
+
+        if (is_string($result)) {
+            $result =  json_decode($result, true);
+            $d['result'] = $result;
+        }
+
+        if( $method == 'setex'  && isset($arguments[2]) && is_string($arguments[2])) {
+            $arguments[2] =  json_decode($arguments[2], true);
+        }
+
+        $logs[] = $d;
         Context::set('redis.logs', $logs);
 
         return $result;
